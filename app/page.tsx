@@ -264,7 +264,7 @@ const Header = ({ cartCount, onCartOpen, onGoHome, onGoCor, currentPage, setPage
           { id: "produtos", label: "Produtos" },
           { id: "kits", label: "Kits" },
           { id: "calculadora", label: "Calculadora" },
-          { id: "simulador", label: "Simulador" },
+          { id: "Catalogo", label: "Catalogo" },
           { id: "entrega", label: "Entrega" },
         ].map(item => (
           <button key={item.id} onClick={() => setPage(item.id)}
@@ -528,224 +528,709 @@ const KitsPage = ({ onAddKit }: { onAddKit: (name: string, price: number) => voi
 
 // ─── PAINT CALCULATOR PAGE ────────────────────────────────────────────────────
 
-const CalculatorPage = () => {
-  const [width, setWidth] = useState("")
-  const [height, setHeight] = useState("")
-  const [coats, setCoats] = useState(2)
-  const [doors, setDoors] = useState(1)
-  const [windows, setWindows] = useState(1)
-  const [coverage, setCoverage] = useState(400)
-  const [result, setResult] = useState<{ area: number; cans18L: number; cans36L: number; liters: number } | null>(null)
+const SURFACE_TYPES = [
+  { value: "lisa", label: "Lisa", multiplier: 1.0, desc: "Tinta parede normal" },
+  { value: "texturizada", label: "Texturizada", multiplier: 1.3, desc: "+30% de consumo" },
+  { value: "massa_corrida", label: "Massa Corrida", multiplier: 0.85, desc: "-15% de consumo" },
+  { value: "concreto", label: "Concreto Aparente", multiplier: 1.5, desc: "+50% de consumo" },
+  { value: "madeira", label: "Madeira", multiplier: 1.2, desc: "+20% de consumo" },
+]
 
-  const calculate = () => {
-    const w = parseFloat(width)
-    const h = parseFloat(height)
-    if (!w || !h) return
-    const totalArea = w * h * 4  // 4 paredes simplificado
-    const doorArea = doors * 2.1
-    const windowArea = windows * 1.2
-    const netArea = Math.max(0, totalArea - doorArea - windowArea)
-    const liters = (netArea / coverage) * coats * 3.6  // convert to 3.6L equivalents
-    const litersTotal = (netArea / coverage) * coats
-    const cans18L = Math.ceil(litersTotal * 18 / 18)
-    const cans36L = Math.ceil(litersTotal * 18 / 3.6)
-    setResult({ area: Math.round(netArea * 10) / 10, cans18L, cans36L, liters: Math.round(litersTotal * 10) / 10 })
+const PRODUCTS_SUGGESTION = [
+  { name: "Coral Rende Muito", coverage: 400, price18L: 189.90, price36L: 54.90, brand: "Coral", type: "lisa" },
+  { name: "Suvinil Clássica", coverage: 350, price18L: 169.90, price36L: 48.90, brand: "Suvinil", type: "lisa" },
+  { name: "Coral Textura", coverage: 280, price18L: 209.90, price36L: 62.90, brand: "Coral", type: "texturizada" },
+  { name: "Suvinil Textura", coverage: 300, price18L: 199.90, price36L: 58.90, brand: "Suvinil", type: "texturizada" },
+  { name: "Coral Massa Corrida", coverage: 450, price18L: 149.90, price36L: 42.90, brand: "Coral", type: "massa_corrida" },
+  { name: "Montana Primer", coverage: 320, price18L: 179.90, price36L: 52.90, brand: "Montana", type: "concreto" },
+  { name: "Suvinil Madeira", coverage: 300, price18L: 159.90, price36L: 46.90, brand: "Suvinil", type: "madeira" },
+]
+
+const ROOM_PRESETS = [
+  { name: "Sala", width: "5", length: "4", height: "2.8", doors: 1, windows: 2 },
+  { name: "Quarto", width: "3.5", length: "3.5", height: "2.7", doors: 1, windows: 1 },
+  { name: "Cozinha", width: "3", length: "4", height: "2.7", doors: 1, windows: 1 },
+  { name: "Banheiro", width: "2", length: "2.5", height: "2.5", doors: 1, windows: 0 },
+  { name: "Garagem", width: "6", length: "5", height: "3", doors: 1, windows: 0 },
+]
+
+type Room = {
+  id: number
+  name: string
+  width: string
+  length: string
+  height: string
+  doors: number
+  windows: number
+  surface: string
+  coats: number
+  includeCeiling: boolean
+}
+
+type RoomResult = {
+  id: number
+  name: string
+  area: number
+  liters: number
+  cans18L: number
+  cans36L: number
+}
+
+const emptyRoom = (id: number): Room => ({
+  id,
+  name: `Ambiente ${id}`,
+  width: "",
+  length: "",
+  height: "2.8",
+  doors: 1,
+  windows: 1,
+  surface: "lisa",
+  coats: 2,
+  includeCeiling: false,
+})
+
+const CalculatorPage = () => {
+  const [rooms, setRooms] = useState<Room[]>([emptyRoom(1)])
+  const [coverage, setCoverage] = useState(400)
+  const [pricePerCan18L, setPricePerCan18L] = useState("")
+  const [results, setResults] = useState<RoomResult[] | null>(null)
+  const [activeRoom, setActiveRoom] = useState(0)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  const updateRoom = (id: number, field: keyof Room, value: string | number | boolean) => {
+    setRooms(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
   }
 
+  const addRoom = () => {
+    const newId = Date.now()
+    setRooms(prev => [...prev, emptyRoom(newId)])
+    setActiveRoom(rooms.length)
+  }
+
+  const removeRoom = (id: number) => {
+    if (rooms.length === 1) return
+    setRooms(prev => prev.filter(r => r.id !== id))
+    setActiveRoom(0)
+  }
+
+  const applyPreset = (preset: typeof ROOM_PRESETS[0], roomId: number) => {
+    setRooms(prev => prev.map(r => r.id === roomId ? {
+      ...r,
+      name: preset.name,
+      width: preset.width,
+      length: preset.length,
+      height: preset.height,
+      doors: preset.doors,
+      windows: preset.windows,
+    } : r))
+  }
+
+  const calculate = () => {
+    const roomResults: RoomResult[] = []
+
+    for (const room of rooms) {
+      const w = parseFloat(room.width)
+      const l = parseFloat(room.length)
+      const h = parseFloat(room.height)
+      if (!w || !l || !h) continue
+
+      const surface = SURFACE_TYPES.find(s => s.value === room.surface)!
+      const wallArea = (2 * (w + l)) * h
+      const ceilingArea = room.includeCeiling ? w * l : 0
+      const doorArea = room.doors * 2.1
+      const windowArea = room.windows * 1.2
+      const netArea = Math.max(0, wallArea + ceilingArea - doorArea - windowArea)
+      const adjustedArea = netArea * surface.multiplier
+      const litersTotal = (adjustedArea / coverage) * room.coats
+      const cans18L = Math.ceil(litersTotal / 18)
+      const cans36L = Math.ceil(litersTotal / 3.6)
+
+      roomResults.push({
+        id: room.id,
+        name: room.name,
+        area: Math.round(netArea * 10) / 10,
+        liters: Math.round(litersTotal * 10) / 10,
+        cans18L,
+        cans36L,
+      })
+    }
+
+    setResults(roomResults)
+    setShowSuggestions(true)
+  }
+
+  const totalArea = results?.reduce((s, r) => s + r.area, 0) ?? 0
+  const totalLiters = results?.reduce((s, r) => s + r.liters, 0) ?? 0
+  const totalCans18L = results?.reduce((s, r) => s + r.cans18L, 0) ?? 0
+  const totalCans36L = results?.reduce((s, r) => s + r.cans36L, 0) ?? 0
+  const totalCost = pricePerCan18L ? totalCans18L * parseFloat(pricePerCan18L) : null
+
+  const currentRoom = rooms[activeRoom] ?? rooms[0]
+  const currentSurface = SURFACE_TYPES.find(s => s.value === currentRoom.surface)!
+  const suggestedProducts = PRODUCTS_SUGGESTION.filter(p => p.type === currentRoom.surface)
+
   return (
-    <div style={{ background: "#f7f8fc", minHeight: "100vh", padding: "0 0 80px" }}>
+    <div style={{ background: "#f7f8fc", minHeight: "100vh", paddingBottom: 80 }}>
+
+      {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #064e3b 0%, #065f46 100%)", padding: "24px 16px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <Calculator size={22} color="#34d399" />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <span style={{ fontSize: 22 }}>🧮</span>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: "white", margin: 0 }}>Calculadora de Tinta</h1>
         </div>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: 0 }}>Calcule exatamente quanto tinta você precisa. Sem desperdício!</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: 0 }}>
+          Calcule por ambiente · Custo total · Sugestão de produto
+        </p>
       </div>
 
-      <div style={{ padding: 16 }}>
-        {/* Room input */}
-        <div style={{ background: "white", borderRadius: 14, padding: 16, marginBottom: 16, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 800, color: "#1a1464", marginBottom: 14 }}>📐 Dimensões do Ambiente</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Largura (m)</label>
-              <input type="number" value={width} onChange={e => setWidth(e.target.value)} placeholder="Ex: 4.0"
-                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Comprimento (m)</label>
-              <input type="number" value={height} onChange={e => setHeight(e.target.value)} placeholder="Ex: 5.0"
-                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-            </div>
-          </div>
+      <div style={{ padding: "16px 16px 0" }}>
 
-          <h3 style={{ fontSize: 14, fontWeight: 800, color: "#1a1464", marginBottom: 12 }}>🪟 Descontar aberturas</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Portas</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button onClick={() => setDoors(Math.max(0, doors - 1))} style={{ width: 32, height: 32, border: "1px solid #d1d5db", borderRadius: 8, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={14} /></button>
-                <span style={{ fontSize: 16, fontWeight: 700, minWidth: 24, textAlign: "center" }}>{doors}</span>
-                <button onClick={() => setDoors(doors + 1)} style={{ width: 32, height: 32, border: "1px solid #d1d5db", borderRadius: 8, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={14} /></button>
-              </div>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Janelas</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button onClick={() => setWindows(Math.max(0, windows - 1))} style={{ width: 32, height: 32, border: "1px solid #d1d5db", borderRadius: 8, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={14} /></button>
-                <span style={{ fontSize: 16, fontWeight: 700, minWidth: 24, textAlign: "center" }}>{windows}</span>
-                <button onClick={() => setWindows(windows + 1)} style={{ width: 32, height: 32, border: "1px solid #d1d5db", borderRadius: 8, background: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={14} /></button>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Número de demãos: <strong style={{ color: "#1a1464" }}>{coats}</strong></label>
-            <input type="range" min={1} max={3} value={coats} onChange={e => setCoats(Number(e.target.value))}
-              style={{ width: "100%", accentColor: "#1a1464" }} />
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#999" }}>
-              <span>1 demão</span><span>2 demãos (rec.)</span><span>3 demãos</span>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Rendimento da tinta (m²/L)</label>
-            <select value={coverage} onChange={e => setCoverage(Number(e.target.value))}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px", fontSize: 13, background: "white", outline: "none" }}>
-              <option value={280}>Baixo rendimento – 280 m²/18L</option>
-              <option value={350}>Médio rendimento – 350 m²/18L</option>
-              <option value={400}>Alto rendimento – 400 m²/18L (padrão)</option>
-              <option value={450}>Premium – 450 m²/18L</option>
-            </select>
-          </div>
-
-          <button onClick={calculate}
-            style={{ width: "100%", background: "linear-gradient(135deg, #064e3b, #065f46)", color: "white", border: "none", borderRadius: 10, padding: "14px", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
-            🧮 Calcular
+        {/* Room tabs */}
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 14, paddingBottom: 4 }}>
+          {rooms.map((r, i) => (
+            <button key={r.id} onClick={() => setActiveRoom(i)}
+              style={{
+                flexShrink: 0, padding: "7px 14px", borderRadius: 20,
+                border: activeRoom === i ? "none" : "1px solid #d1d5db",
+                background: activeRoom === i ? "#065f46" : "white",
+                color: activeRoom === i ? "white" : "#555",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>
+              {r.name}
+            </button>
+          ))}
+          <button onClick={addRoom}
+            style={{
+              flexShrink: 0, padding: "7px 14px", borderRadius: 20,
+              border: "2px dashed #d1d5db", background: "transparent",
+              color: "#059669", fontSize: 12, fontWeight: 700, cursor: "pointer",
+            }}>
+            + Ambiente
           </button>
         </div>
 
-        {/* Result */}
-        {result && (
-          <div style={{ background: "white", borderRadius: 14, padding: 16, boxShadow: "0 1px 8px rgba(0,0,0,0.06)", border: "2px solid #059669" }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#059669", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
-              <Check size={18} /> Resultado do cálculo
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-              {[
-                { label: "Área líquida", value: `${result.area} m²`, icon: "📐" },
-                { label: "Total de tinta", value: `${result.liters} litros`, icon: "🪣" },
-                { label: "Latas de 18L", value: `${result.cans18L} lata(s)`, icon: "📦" },
-                { label: "Galões de 3,6L", value: `${result.cans36L} galão(ões)`, icon: "🔵" },
-              ].map(item => (
-                <div key={item.label} style={{ background: "#f0fdf4", borderRadius: 10, padding: "12px 10px", textAlign: "center", border: "1px solid #86efac" }}>
-                  <div style={{ fontSize: 20, marginBottom: 4 }}>{item.icon}</div>
-                  <div style={{ fontSize: 16, fontWeight: 900, color: "#1a1464" }}>{item.value}</div>
-                  <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>{item.label}</div>
-                </div>
+        {/* Room form */}
+        <div style={{ background: "white", borderRadius: 14, padding: 16, marginBottom: 14, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
+
+          {/* Room name + remove */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+            <input
+              value={currentRoom.name}
+              onChange={e => updateRoom(currentRoom.id, "name", e.target.value)}
+              style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", fontSize: 14, fontWeight: 700, outline: "none", color: "#1a1464" }}
+            />
+            {rooms.length > 1 && (
+              <button onClick={() => removeRoom(currentRoom.id)}
+                style={{ border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 10px", background: "#fff5f5", cursor: "pointer", color: "#ef4444", fontSize: 12, fontWeight: 700 }}>
+                🗑 Remover
+              </button>
+            )}
+          </div>
+
+          {/* Presets */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>⚡ Preencher com preset:</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {ROOM_PRESETS.map(p => (
+                <button key={p.name} onClick={() => applyPreset(p, currentRoom.id)}
+                  style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "white", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "#333" }}>
+                  {p.name}
+                </button>
               ))}
             </div>
-            <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "#78350f" }}>
-              💡 Recomendamos comprar 10% a mais para retoques futuros. Fórmula: Área ÷ Rendimento ÷ Nº de demãos.
+          </div>
+
+          {/* Dimensões */}
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1464", marginBottom: 10 }}>📐 Dimensões</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "Largura (m)", field: "width" as keyof Room, placeholder: "4.0" },
+              { label: "Comprimento (m)", field: "length" as keyof Room, placeholder: "5.0" },
+              { label: "Altura (m)", field: "height" as keyof Room, placeholder: "2.8" },
+            ].map(({ label, field, placeholder }) => (
+              <div key={field}>
+                <label style={{ fontSize: 10, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>{label}</label>
+                <input
+                  type="number"
+                  value={currentRoom[field] as string}
+                  onChange={e => updateRoom(currentRoom.id, field, e.target.value)}
+                  placeholder={placeholder}
+                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "9px 10px", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Teto */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, background: "#f0fdf4", borderRadius: 8, padding: "10px 12px" }}>
+            <input
+              type="checkbox"
+              id="ceiling"
+              checked={currentRoom.includeCeiling}
+              onChange={e => updateRoom(currentRoom.id, "includeCeiling", e.target.checked)}
+              style={{ accentColor: "#059669", width: 16, height: 16 }}
+            />
+            <label htmlFor="ceiling" style={{ fontSize: 12, fontWeight: 600, color: "#065f46", cursor: "pointer" }}>
+              🏠 Incluir teto no cálculo
+            </label>
+          </div>
+
+          {/* Aberturas */}
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1464", marginBottom: 10 }}>🚪 Aberturas</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+            {[
+              { label: "Portas", field: "doors" as keyof Room },
+              { label: "Janelas", field: "windows" as keyof Room },
+            ].map(({ label, field }) => (
+              <div key={field}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>{label}</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => updateRoom(currentRoom.id, field, Math.max(0, (currentRoom[field] as number) - 1))}
+                    style={{ width: 32, height: 32, border: "1px solid #d1d5db", borderRadius: 8, background: "white", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>−</button>
+                  <span style={{ fontSize: 16, fontWeight: 700, minWidth: 24, textAlign: "center" }}>{currentRoom[field] as number}</span>
+                  <button onClick={() => updateRoom(currentRoom.id, field, (currentRoom[field] as number) + 1)}
+                    style={{ width: 32, height: 32, border: "1px solid #d1d5db", borderRadius: 8, background: "white", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Demãos */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>
+              Número de demãos: <strong style={{ color: "#1a1464" }}>{currentRoom.coats}</strong>
+            </label>
+            <input type="range" min={1} max={3} value={currentRoom.coats}
+              onChange={e => updateRoom(currentRoom.id, "coats", Number(e.target.value))}
+              style={{ width: "100%", accentColor: "#065f46" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#999" }}>
+              <span>1</span><span>2 (recomendado)</span><span>3</span>
             </div>
           </div>
+
+          {/* Tipo de superfície */}
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1464", marginBottom: 10 }}>🖌️ Tipo de Superfície</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {SURFACE_TYPES.map(s => (
+              <button key={s.value} onClick={() => updateRoom(currentRoom.id, "surface", s.value)}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 14px", borderRadius: 10,
+                  border: currentRoom.surface === s.value ? "2px solid #059669" : "1px solid #e5e7eb",
+                  background: currentRoom.surface === s.value ? "#f0fdf4" : "white",
+                  cursor: "pointer", textAlign: "left",
+                }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: currentRoom.surface === s.value ? "#065f46" : "#333" }}>{s.label}</span>
+                <span style={{ fontSize: 11, color: "#888" }}>{s.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Rendimento global */}
+        <div style={{ background: "white", borderRadius: 14, padding: 16, marginBottom: 14, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1464", marginBottom: 10 }}>⚙️ Configurações Gerais</div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>Rendimento da tinta (m²/18L)</label>
+            <select value={coverage} onChange={e => setCoverage(Number(e.target.value))}
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px", fontSize: 13, background: "white", outline: "none" }}>
+              <option value={280}>Baixo – 280 m²/18L</option>
+              <option value={350}>Médio – 350 m²/18L</option>
+              <option value={400}>Alto – 400 m²/18L (padrão)</option>
+              <option value={450}>Premium – 450 m²/18L</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>
+              💰 Preço por lata 18L (R$) <span style={{ color: "#aaa", fontWeight: 400 }}>opcional</span>
+            </label>
+            <input
+              type="number"
+              value={pricePerCan18L}
+              onChange={e => setPricePerCan18L(e.target.value)}
+              placeholder="Ex: 189.90"
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
+        </div>
+
+        {/* Calcular */}
+        <button onClick={calculate}
+          style={{ width: "100%", background: "linear-gradient(135deg, #064e3b, #065f46)", color: "white", border: "none", borderRadius: 12, padding: "16px", fontSize: 15, fontWeight: 800, cursor: "pointer", marginBottom: 16 }}>
+          🧮 Calcular {rooms.length > 1 ? `${rooms.length} Ambientes` : ""}
+        </button>
+
+        {/* Resultados */}
+        {results && results.length > 0 && (
+          <>
+            {/* Por ambiente */}
+            {results.map(r => (
+              <div key={r.id} style={{ background: "white", borderRadius: 14, padding: 14, marginBottom: 10, boxShadow: "0 1px 8px rgba(0,0,0,0.06)", borderLeft: "4px solid #059669" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#065f46", marginBottom: 10 }}>🏠 {r.name}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                  {[
+                    { label: "Área", value: `${r.area}m²`, icon: "📐" },
+                    { label: "Litros", value: `${r.liters}L`, icon: "🪣" },
+                    { label: "Latas 18L", value: `${r.cans18L}`, icon: "📦" },
+                    { label: "Galões 3,6L", value: `${r.cans36L}`, icon: "🔵" },
+                  ].map(item => (
+                    <div key={item.label} style={{ background: "#f0fdf4", borderRadius: 8, padding: "8px 4px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, marginBottom: 2 }}>{item.icon}</div>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: "#1a1464" }}>{item.value}</div>
+                      <div style={{ fontSize: 9, color: "#666" }}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Total geral */}
+            {rooms.length > 1 && (
+              <div style={{ background: "#1a1464", borderRadius: 14, padding: 16, marginBottom: 14 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#fbbf24", marginBottom: 12 }}>📊 Total Geral — {results.length} ambientes</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {[
+                    { label: "Área total", value: `${Math.round(totalArea * 10) / 10} m²` },
+                    { label: "Total de tinta", value: `${Math.round(totalLiters * 10) / 10} L` },
+                    { label: "Latas 18L", value: `${totalCans18L} lata(s)` },
+                    { label: "Galões 3,6L", value: `${totalCans36L} galão(ões)` },
+                  ].map(item => (
+                    <div key={item.label} style={{ background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, fontWeight: 900, color: "white" }}>{item.value}</div>
+                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {totalCost && (
+                  <div style={{ marginTop: 12, background: "#fbbf24", borderRadius: 10, padding: "14px", textAlign: "center" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1464" }}>💰 CUSTO ESTIMADO TOTAL</div>
+                    <div style={{ fontSize: 26, fontWeight: 900, color: "#1a1464" }}>
+                      R$ {totalCost.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#78350f", marginTop: 2 }}>
+                      {totalCans18L} lata(s) × R$ {parseFloat(pricePerCan18L).toFixed(2)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Custo (1 ambiente) */}
+            {rooms.length === 1 && totalCost && (
+              <div style={{ background: "#fbbf24", borderRadius: 14, padding: 16, marginBottom: 14, textAlign: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#78350f" }}>💰 CUSTO ESTIMADO</div>
+                <div style={{ fontSize: 28, fontWeight: 900, color: "#1a1464" }}>
+                  R$ {totalCost.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: 11, color: "#78350f" }}>
+                  {totalCans18L} lata(s) 18L × R$ {parseFloat(pricePerCan18L).toFixed(2)}
+                </div>
+              </div>
+            )}
+
+            {/* Sugestões de produto */}
+            {showSuggestions && (
+              <div style={{ background: "white", borderRadius: 14, padding: 16, marginBottom: 14, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1464", marginBottom: 4 }}>
+                  🛒 Produtos Sugeridos
+                </div>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+                  Para superfície: <strong>{currentSurface.label}</strong>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {(suggestedProducts.length > 0 ? suggestedProducts : PRODUCTS_SUGGESTION.slice(0, 3)).map(p => {
+                    const unitCost = totalCans18L * p.price18L
+                    return (
+                      <div key={p.name} style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "12px 14px", borderRadius: 10, border: "1px solid #e5e7eb",
+                        background: "#fafafa",
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#1a1464" }}>{p.name}</div>
+                          <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>{p.brand} · {p.coverage} m²/18L</div>
+                          <div style={{ fontSize: 11, color: "#059669", fontWeight: 700, marginTop: 4 }}>
+                            Lata 18L: R$ {p.price18L.toFixed(2)} · Galão: R$ {p.price36L.toFixed(2)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 11, color: "#555" }}>{totalCans18L} lata(s)</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color: "#1a1464" }}>
+                            R$ {unitCost.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                          </div>
+                          <button style={{
+                            marginTop: 6, padding: "5px 10px", borderRadius: 8,
+                            border: "none", background: "#1a1464", color: "white",
+                            fontSize: 11, fontWeight: 700, cursor: "pointer",
+                          }}>
+                            + Carrinho
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Dica */}
+            <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 10, padding: "12px 14px", fontSize: 11, color: "#78350f", marginBottom: 16 }}>
+              💡 Recomendamos comprar 10% a mais para retoques futuros. Os valores de superfície texturizada e concreto consomem mais tinta que o normal.
+            </div>
+          </>
         )}
       </div>
     </div>
   )
 }
 
-// ─── COLOR SIMULATOR PAGE ─────────────────────────────────────────────────────
+// ─── COLOR CATALOG ────────────────────────────────────────────────────────────
 
-const SimulatorPage = () => {
-  const [selectedColor, setSelectedColor] = useState(COLOR_PALETTE[0])
+const COLOR_CATALOG = [
+  { name: "Branco Neve", hex: "#FAFAFA", group: "Brancos & Neutros" },
+  { name: "Branco Gelo", hex: "#F0F4F8", group: "Brancos & Neutros" },
+  { name: "Branco Puro", hex: "#FFFFFF", group: "Brancos & Neutros" },
+  { name: "Branco Areia", hex: "#F5F0E8", group: "Brancos & Neutros" },
+  { name: "Branco Creme", hex: "#FFFDD0", group: "Brancos & Neutros" },
+  { name: "Marfim", hex: "#FFFFF0", group: "Brancos & Neutros" },
+  { name: "Pérola", hex: "#F0EAD6", group: "Brancos & Neutros" },
+  { name: "Gesso", hex: "#E8E4DA", group: "Brancos & Neutros" },
+  { name: "Cinza Claro", hex: "#D9D9D9", group: "Cinzas" },
+  { name: "Cinza Prata", hex: "#C0C0C0", group: "Cinzas" },
+  { name: "Cinza Médio", hex: "#9E9E9E", group: "Cinzas" },
+  { name: "Cinza Chumbo", hex: "#616161", group: "Cinzas" },
+  { name: "Cinza Escuro", hex: "#424242", group: "Cinzas" },
+  { name: "Cinza Grafite", hex: "#2D2D2D", group: "Cinzas" },
+  { name: "Cinza Fumaça", hex: "#B0B0B0", group: "Cinzas" },
+  { name: "Cinza Ardósia", hex: "#708090", group: "Cinzas" },
+  { name: "Cinza Azulado", hex: "#7B8FA1", group: "Cinzas" },
+  { name: "Cinza Quente", hex: "#A09080", group: "Cinzas" },
+  { name: "Preto Fosco", hex: "#1A1A1A", group: "Pretos" },
+  { name: "Preto Brilhante", hex: "#0D0D0D", group: "Pretos" },
+  { name: "Preto Grafite", hex: "#222222", group: "Pretos" },
+  { name: "Preto Aveludado", hex: "#111111", group: "Pretos" },
+  { name: "Amarelo Ouro", hex: "#FFD700", group: "Amarelos" },
+  { name: "Amarelo Sol", hex: "#FFC107", group: "Amarelos" },
+  { name: "Amarelo Canário", hex: "#FFEB3B", group: "Amarelos" },
+  { name: "Amarelo Mostarda", hex: "#D4A017", group: "Amarelos" },
+  { name: "Amarelo Palha", hex: "#E8D88A", group: "Amarelos" },
+  { name: "Amarelo Cúrcuma", hex: "#C8A415", group: "Amarelos" },
+  { name: "Amarelo Limão", hex: "#F9E04B", group: "Amarelos" },
+  { name: "Amarelo Âmbar", hex: "#FFBF00", group: "Amarelos" },
+  { name: "Laranja Queimado", hex: "#CC5500", group: "Laranjas" },
+  { name: "Laranja Vivo", hex: "#FF6600", group: "Laranjas" },
+  { name: "Laranja Pêssego", hex: "#FFAD8A", group: "Laranjas" },
+  { name: "Laranja Terracota", hex: "#C04A2A", group: "Laranjas" },
+  { name: "Laranja Cobre", hex: "#B87333", group: "Laranjas" },
+  { name: "Laranja Coral", hex: "#FF6B4A", group: "Laranjas" },
+  { name: "Laranja Abóbora", hex: "#E67300", group: "Laranjas" },
+  { name: "Vermelho Cardinal", hex: "#C41E3A", group: "Vermelhos" },
+  { name: "Vermelho Tijolo", hex: "#8B2500", group: "Vermelhos" },
+  { name: "Vermelho Cereja", hex: "#DC143C", group: "Vermelhos" },
+  { name: "Vermelho Sangue", hex: "#880808", group: "Vermelhos" },
+  { name: "Vermelho Framboesa", hex: "#C72050", group: "Vermelhos" },
+  { name: "Vermelho Coral", hex: "#E8524A", group: "Vermelhos" },
+  { name: "Vermelho Escarlate", hex: "#FF2400", group: "Vermelhos" },
+  { name: "Vermelho Vinho", hex: "#722F37", group: "Vermelhos" },
+  { name: "Vermelho Pimentão", hex: "#B22222", group: "Vermelhos" },
+  { name: "Rosa Bebê", hex: "#FFB6C1", group: "Rosas" },
+  { name: "Rosa Choque", hex: "#FF69B4", group: "Rosas" },
+  { name: "Rosa Antigo", hex: "#C8737A", group: "Rosas" },
+  { name: "Rosa Quartzo", hex: "#F4A7B9", group: "Rosas" },
+  { name: "Rosa Salmão", hex: "#FA8072", group: "Rosas" },
+  { name: "Rosa Nude", hex: "#E8B4A0", group: "Rosas" },
+  { name: "Rosa Magenta", hex: "#FF00A0", group: "Rosas" },
+  { name: "Roxo Real", hex: "#6B2FA0", group: "Roxos & Violetas" },
+  { name: "Roxo Uva", hex: "#4B0082", group: "Roxos & Violetas" },
+  { name: "Violeta", hex: "#8B00FF", group: "Roxos & Violetas" },
+  { name: "Lilás", hex: "#C8A2C8", group: "Roxos & Violetas" },
+  { name: "Lavanda", hex: "#B57EDC", group: "Roxos & Violetas" },
+  { name: "Roxo Berinjela", hex: "#480048", group: "Roxos & Violetas" },
+  { name: "Orquídea", hex: "#DA70D6", group: "Roxos & Violetas" },
+  { name: "Ametista", hex: "#9966CC", group: "Roxos & Violetas" },
+  { name: "Azul Marinho", hex: "#001F5B", group: "Azuis" },
+  { name: "Azul Royal", hex: "#1a1464", group: "Azuis" },
+  { name: "Azul Celeste", hex: "#4A90D9", group: "Azuis" },
+  { name: "Azul Bebê", hex: "#ADD8E6", group: "Azuis" },
+  { name: "Azul Cobalto", hex: "#0047AB", group: "Azuis" },
+  { name: "Azul Petróleo", hex: "#005F73", group: "Azuis" },
+  { name: "Azul Índigo", hex: "#4B0082", group: "Azuis" },
+  { name: "Azul Aço", hex: "#4682B4", group: "Azuis" },
+  { name: "Azul Denim", hex: "#1560BD", group: "Azuis" },
+  { name: "Azul Piscina", hex: "#0099CC", group: "Azuis" },
+  { name: "Azul Gelo", hex: "#D6EAF8", group: "Azuis" },
+  { name: "Azul Meia-noite", hex: "#191970", group: "Azuis" },
+  { name: "Verde Floresta", hex: "#228B22", group: "Verdes" },
+  { name: "Verde Oliva", hex: "#6B7C3A", group: "Verdes" },
+  { name: "Verde Militar", hex: "#4A5240", group: "Verdes" },
+  { name: "Verde Menta", hex: "#98D8C8", group: "Verdes" },
+  { name: "Verde Limão", hex: "#8BC34A", group: "Verdes" },
+  { name: "Verde Esmeralda", hex: "#009473", group: "Verdes" },
+  { name: "Verde Musgo", hex: "#4A5240", group: "Verdes" },
+  { name: "Verde Jade", hex: "#00A86B", group: "Verdes" },
+  { name: "Verde Abacate", hex: "#568203", group: "Verdes" },
+  { name: "Verde Tiffany", hex: "#0ABAB5", group: "Verdes" },
+  { name: "Verde Pistache", hex: "#93C572", group: "Verdes" },
+  { name: "Verde Bambu", hex: "#6BAA75", group: "Verdes" },
+  { name: "Marrom Café", hex: "#6F4E37", group: "Marrons & Terrosos" },
+  { name: "Marrom Chocolate", hex: "#3D1C02", group: "Marrons & Terrosos" },
+  { name: "Marrom Caramelo", hex: "#C68642", group: "Marrons & Terrosos" },
+  { name: "Marrom Canela", hex: "#8B4513", group: "Marrons & Terrosos" },
+  { name: "Bege Areia", hex: "#C2A882", group: "Marrons & Terrosos" },
+  { name: "Bege Claro", hex: "#D9C4A0", group: "Marrons & Terrosos" },
+  { name: "Terracota", hex: "#A0522D", group: "Marrons & Terrosos" },
+  { name: "Siena", hex: "#882D17", group: "Marrons & Terrosos" },
+  { name: "Ocre", hex: "#CC7722", group: "Marrons & Terrosos" },
+  { name: "Mogno", hex: "#6B2D0A", group: "Marrons & Terrosos" },
+  { name: "Dourado Metálico", hex: "#CFB53B", group: "Especiais" },
+  { name: "Prata Metálica", hex: "#A8A9AD", group: "Especiais" },
+  { name: "Bronze", hex: "#8C6A2F", group: "Especiais" },
+  { name: "Cobre Metálico", hex: "#AD6F3B", group: "Especiais" },
+  { name: "Champagne", hex: "#F7E7CE", group: "Especiais" },
+  { name: "Grafite Metálico", hex: "#404040", group: "Especiais" },
+]
+
+const ColorCatalog = () => {
   const [selectedGroup, setSelectedGroup] = useState("Todos")
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [search, setSearch] = useState("")
+  const [selectedColor, setSelectedColor] = useState<typeof COLOR_CATALOG[0] | null>(null)
+  const [copied, setCopied] = useState(false)
 
-  const groups = ["Todos", ...Array.from(new Set(COLOR_PALETTE.map(c => c.group)))]
-  const filtered = selectedGroup === "Todos" ? COLOR_PALETTE : COLOR_PALETTE.filter(c => c.group === selectedGroup)
+  const groups = ["Todos", ...Array.from(new Set(COLOR_CATALOG.map(c => c.group)))]
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => setUploadedImage(ev.target?.result as string)
-    reader.readAsDataURL(file)
+  const filtered = COLOR_CATALOG.filter(c => {
+    const matchGroup = selectedGroup === "Todos" || c.group === selectedGroup
+    const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.hex.toLowerCase().includes(search.toLowerCase())
+    return matchGroup && matchSearch
+  })
+
+  const copyHex = (hex: string) => {
+    navigator.clipboard.writeText(hex)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   return (
-    <div style={{ background: "#f7f8fc", minHeight: "100vh", padding: "0 0 80px" }}>
-      <div style={{ background: "linear-gradient(135deg, #4c1d95 0%, #6d28d9 100%)", padding: "24px 16px 20px" }}>
+    <div style={{ background: "#f7f8fc", minHeight: "100vh", paddingBottom: 80 }}>
+      <div style={{ background: "linear-gradient(135deg, #1a1464 0%, #2d24a0 100%)", padding: "24px 16px 20px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <Palette size={22} color="#c4b5fd" />
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: "white", margin: 0 }}>Simulador de Cores</h1>
+          <span style={{ fontSize: 22 }}>🎨</span>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: "white", margin: 0 }}>Catálogo de Cores</h1>
         </div>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: 0 }}>Escolha uma cor e visualize no ambiente antes de comprar.</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: "0 0 16px" }}>
+          {COLOR_CATALOG.length} cores disponíveis · Automotivo, Industrial e muito mais
+        </p>
+        <div style={{ position: "relative" }}>
+          <input
+            type="text"
+            placeholder="Buscar por nome ou código hex..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              width: "100%", padding: "10px 16px 10px 40px",
+              borderRadius: 10, border: "none", fontSize: 13,
+              background: "rgba(255,255,255,0.15)", color: "white",
+              outline: "none", boxSizing: "border-box",
+            }}
+          />
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 16 }}>🔍</span>
+        </div>
       </div>
 
-      <div style={{ padding: 16 }}>
-        {/* Preview area */}
-        <div style={{ background: "white", borderRadius: 14, marginBottom: 16, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.08)" }}>
-          <div style={{ position: "relative", height: 200, background: "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {uploadedImage ? (
-              <div style={{ position: "relative", width: "100%", height: "100%" }}>
-                <img src={uploadedImage} alt="Ambiente" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                <div style={{ position: "absolute", inset: 0, background: selectedColor.hex, opacity: 0.45, mixBlendMode: "multiply" }} />
-              </div>
-            ) : (
-              <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: selectedColor.hex, transition: "background 0.4s" }}>
-                <div style={{ background: "rgba(0,0,0,0.12)", borderRadius: 12, padding: "16px 20px", textAlign: "center" }}>
-                  <div style={{ fontSize: 28, marginBottom: 6 }}>🏠</div>
-                  <div style={{ fontSize: 12, color: "rgba(0,0,0,0.5)", fontWeight: 600 }}>Prévia da cor</div>
-                  <div style={{ fontSize: 14, color: "rgba(0,0,0,0.7)", fontWeight: 800, marginTop: 2 }}>{selectedColor.name}</div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1464" }}>{selectedColor.name}</div>
-              <div style={{ fontSize: 11, color: "#888" }}>{selectedColor.hex} · {selectedColor.group}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => fileRef.current?.click()}
-                style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", background: "white", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#333" }}>
-                <Upload size={14} /> Upload
-              </button>
-              {uploadedImage && (
-                <button onClick={() => setUploadedImage(null)}
-                  style={{ border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 10px", background: "#fff5f5", cursor: "pointer", color: "#ef4444" }}>
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
-          </div>
-        </div>
-
-        {/* Color groups filter */}
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+      <div style={{ padding: "12px 16px 0" }}>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 14, paddingBottom: 4 }}>
           {groups.map(g => (
             <button key={g} onClick={() => setSelectedGroup(g)}
-              style={{ flexShrink: 0, padding: "6px 14px", borderRadius: 20, border: selectedGroup === g ? "none" : "1px solid #d1d5db", background: selectedGroup === g ? "#6d28d9" : "white", color: selectedGroup === g ? "white" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              style={{
+                flexShrink: 0, padding: "6px 14px", borderRadius: 20,
+                border: selectedGroup === g ? "none" : "1px solid #d1d5db",
+                background: selectedGroup === g ? "#1a1464" : "white",
+                color: selectedGroup === g ? "white" : "#555",
+                fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+              }}>
               {g}
             </button>
           ))}
         </div>
 
-        {/* Color grid */}
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
+          {filtered.length} cores encontradas
+        </div>
+
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
           {filtered.map(color => (
-            <button key={color.hex} onClick={() => setSelectedColor(color)}
-              style={{ border: selectedColor.hex === color.hex ? "3px solid #6d28d9" : "2px solid #e5e7eb", borderRadius: 10, padding: "6px 4px 8px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 8, background: color.hex, border: "1px solid rgba(0,0,0,0.08)" }} />
-              <span style={{ fontSize: 9, fontWeight: 600, color: "#555", textAlign: "center", lineHeight: 1.2 }}>{color.name}</span>
+            <button
+              key={color.hex + color.name}
+              onClick={() => setSelectedColor(color)}
+              style={{
+                border: selectedColor?.hex === color.hex ? "3px solid #1a1464" : "2px solid #e5e7eb",
+                borderRadius: 12, padding: "8px 4px 10px",
+                background: "white", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+                boxShadow: selectedColor?.hex === color.hex ? "0 0 0 2px rgba(26,20,100,0.15)" : "none",
+                transition: "all 0.2s",
+              }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: 10,
+                background: color.hex, border: "1px solid rgba(0,0,0,0.08)",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+              }} />
+              <span style={{ fontSize: 9, fontWeight: 600, color: "#444", textAlign: "center", lineHeight: 1.3, padding: "0 2px" }}>
+                {color.name}
+              </span>
             </button>
           ))}
         </div>
       </div>
+
+      {selectedColor && (
+        <div style={{
+          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 50,
+          background: "white", borderRadius: "20px 20px 0 0",
+          boxShadow: "0 -4px 30px rgba(0,0,0,0.15)",
+          padding: "20px 20px 32px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: 14,
+              background: selectedColor.hex,
+              border: "1px solid rgba(0,0,0,0.08)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              flexShrink: 0,
+            }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1464" }}>{selectedColor.name}</div>
+              <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{selectedColor.group}</div>
+              <div style={{ fontSize: 12, color: "#555", fontFamily: "monospace", marginTop: 4, fontWeight: 700 }}>
+                {selectedColor.hex}
+              </div>
+            </div>
+            <button onClick={() => setSelectedColor(null)}
+              style={{ background: "#f3f4f6", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", fontSize: 16 }}>
+              ✕
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <button onClick={() => copyHex(selectedColor.hex)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10,
+                border: "1px solid #e5e7eb", background: "white",
+                fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#333",
+              }}>
+              {copied ? "✓ Copiado!" : "📋 Copiar HEX"}
+            </button>
+            <button style={{
+              flex: 1, padding: "12px", borderRadius: 10,
+              border: "none", background: "#1a1464",
+              fontSize: 13, fontWeight: 600, cursor: "pointer", color: "white",
+            }}>
+              🛒 Adicionar ao carrinho
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1269,7 +1754,7 @@ export default function App() {
       {page === "cor" && (<><ColorPage /><Footer /></>)}
       {page === "kits" && (<><KitsPage onAddKit={addKitToCart} /><Footer /></>)}
       {page === "calculadora" && (<><CalculatorPage /><Footer /></>)}
-      {page === "simulador" && (<><SimulatorPage /><Footer /></>)}
+      {page === "simulador" && (<><ColorCatalog /><Footer /></>)}
       {page === "entrega" && (<><DeliveryPage /><Footer /></>)}
 
       <WhatsAppFAB />
